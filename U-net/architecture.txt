@@ -1,0 +1,713 @@
+UNetMulticlassEndToEndModel
+    |
+    +-- self.model            = UNetMulticlassArchitectureModel
+    +-- self.loss_computation = UNetLossComputationBlock
+    +-- self.postprocess      = UNetPostProcessBlock
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Default input = [B, 3, 256, 256]
+Default output logits = [B, NUM_CLASSES, 256, 256]
+
+NUM_CLASSES = 4
+IGNORE_INDEX = 255
+IMAGE_SIZE = 256
+BATCH_SIZE = 4
+EPOCHS = 30
+LEARNING_RATE = 1e-4
+
+
+========================
+1. Full Model Flow
+========================
+Default configuration used in the provided final code:
+    NUM_CLASSES  = 4
+    IGNORE_INDEX = 255
+    IMAGE_SIZE   = 256
+
+Input = [B, 3, 256, 256]
+    |
+    v
+UNetMulticlassEndToEndModel
+    |
+    +-- UNetMulticlassArchitectureModel
+    |       |
+    |       +-- UNetFinalBlock
+    |               |
+    |               +-- InputBlock
+    |               +-- UNetFeatureExtractorBlock
+    |               +-- UNetDecoderBlock
+    |               +-- OutputBlock
+    |
+    +-- UNetLossComputationBlock
+    |
+    +-- UNetPostProcessBlock
+
+
+UNetMulticlassEndToEndModel.forward(images, masks=None)
+    |
+    +-- logits = self.model(images)
+    |
+    +-- if masks is not None:
+    |       return self.loss_computation(logits, masks)
+    |
+    +-- if self.training is True and masks is None:
+    |       raise ValueError
+    |
+    +-- return self.postprocess(logits)
+
+
+========================
+2. Encoder Flow
+========================
+
+UNetFinalBlock
+    |
+    +-- InputBlock
+    |       |
+    |       +-- validates input is 4D: [N, C, H, W]
+    |       +-- validates C == 3
+    |       +-- output = [B, 3, 256, 256]
+    |
+    +-- UNetFeatureExtractorBlock
+            |
+            +-- EncoderBlock1
+            +-- DownsampleBlock1
+            +-- EncoderBlock2
+            +-- DownsampleBlock2
+            +-- EncoderBlock3
+            +-- DownsampleBlock3
+            +-- EncoderBlock4
+            +-- DownsampleBlock4
+            +-- BottleneckBlock
+
+
+EncoderBlock1
+    |
+    +-- input = [B, 3, 256, 256]
+    |
+    +-- Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(64)
+    +-- ReLU
+    |
+    +-- Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(64)
+    +-- ReLU
+    |
+    +-- skip1 = [B, 64, 256, 256]
+
+DownsampleBlock1
+    |
+    +-- MaxPool2d(kernel_size=2, stride=2)
+    +-- output = [B, 64, 128, 128]
+
+
+EncoderBlock2
+    |
+    +-- input = [B, 64, 128, 128]
+    |
+    +-- Conv2d(64, 128, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(128)
+    +-- ReLU
+    |
+    +-- Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(128)
+    +-- ReLU
+    |
+    +-- skip2 = [B, 128, 128, 128]
+
+DownsampleBlock2
+    |
+    +-- MaxPool2d(kernel_size=2, stride=2)
+    +-- output = [B, 128, 64, 64]
+
+
+EncoderBlock3
+    |
+    +-- input = [B, 128, 64, 64]
+    |
+    +-- Conv2d(128, 256, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(256)
+    +-- ReLU
+    |
+    +-- Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(256)
+    +-- ReLU
+    |
+    +-- skip3 = [B, 256, 64, 64]
+
+DownsampleBlock3
+    |
+    +-- MaxPool2d(kernel_size=2, stride=2)
+    +-- output = [B, 256, 32, 32]
+
+
+EncoderBlock4
+    |
+    +-- input = [B, 256, 32, 32]
+    |
+    +-- Conv2d(256, 512, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(512)
+    +-- ReLU
+    |
+    +-- Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(512)
+    +-- ReLU
+    |
+    +-- skip4 = [B, 512, 32, 32]
+
+DownsampleBlock4
+    |
+    +-- MaxPool2d(kernel_size=2, stride=2)
+    +-- output = [B, 512, 16, 16]
+
+
+BottleneckBlock
+    |
+    +-- input = [B, 512, 16, 16]
+    |
+    +-- Conv2d(512, 1024, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(1024)
+    +-- ReLU
+    |
+    +-- Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(1024)
+    +-- ReLU
+    |
+    +-- bottleneck = [B, 1024, 16, 16]
+
+
+UNetFeatureExtractorBlock return:
+    bottleneck = [B, 1024, 16, 16]
+    skip1      = [B, 64, 256, 256]
+    skip2      = [B, 128, 128, 128]
+    skip3      = [B, 256, 64, 64]
+    skip4      = [B, 512, 32, 32]
+
+
+========================
+3. Decoder Flow
+========================
+
+UNetDecoderBlock
+    |
+    +-- DecoderBlock4(bottleneck, skip4)
+    +-- DecoderBlock3(x, skip3)
+    +-- DecoderBlock2(x, skip2)
+    +-- DecoderBlock1(x, skip1)
+
+
+DecoderBlock4
+    |
+    +-- input x     = [B, 1024, 16, 16]
+    +-- input skip4 = [B, 512, 32, 32]
+    |
+    +-- ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+    |       output = [B, 512, 32, 32]
+    |
+    +-- if spatial size does not match skip4:
+    |       interpolate to skip4 height and width
+    |
+    +-- concatenate skip4 and upsampled x along channel dimension
+    |       concat = [B, 1024, 32, 32]
+    |
+    +-- Conv2d(1024, 512, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(512)
+    +-- ReLU
+    |
+    +-- Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(512)
+    +-- ReLU
+    |
+    +-- output = [B, 512, 32, 32]
+
+
+DecoderBlock3
+    |
+    +-- input x     = [B, 512, 32, 32]
+    +-- input skip3 = [B, 256, 64, 64]
+    |
+    +-- ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+    |       output = [B, 256, 64, 64]
+    |
+    +-- concatenate skip3 and upsampled x
+    |       concat = [B, 512, 64, 64]
+    |
+    +-- Conv2d(512, 256, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(256)
+    +-- ReLU
+    |
+    +-- Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(256)
+    +-- ReLU
+    |
+    +-- output = [B, 256, 64, 64]
+
+
+DecoderBlock2
+    |
+    +-- input x     = [B, 256, 64, 64]
+    +-- input skip2 = [B, 128, 128, 128]
+    |
+    +-- ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+    |       output = [B, 128, 128, 128]
+    |
+    +-- concatenate skip2 and upsampled x
+    |       concat = [B, 256, 128, 128]
+    |
+    +-- Conv2d(256, 128, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(128)
+    +-- ReLU
+    |
+    +-- Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(128)
+    +-- ReLU
+    |
+    +-- output = [B, 128, 128, 128]
+
+
+DecoderBlock1
+    |
+    +-- input x     = [B, 128, 128, 128]
+    +-- input skip1 = [B, 64, 256, 256]
+    |
+    +-- ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+    |       output = [B, 64, 256, 256]
+    |
+    +-- concatenate skip1 and upsampled x
+    |       concat = [B, 128, 256, 256]
+    |
+    +-- Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(64)
+    +-- ReLU
+    |
+    +-- Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    +-- BatchNorm2d(64)
+    +-- ReLU
+    |
+    +-- output = [B, 64, 256, 256]
+
+
+OutputBlock
+    |
+    +-- input = [B, 64, 256, 256]
+    |
+    +-- Conv2d(64, NUM_CLASSES, kernel_size=1, stride=1, padding=0)
+    |
+    +-- logits = [B, NUM_CLASSES, 256, 256]
+
+
+========================
+4. Architecture Model Flow
+========================
+
+UNetMulticlassArchitectureModel
+    |
+    +-- self.model = UNetFinalBlock(num_classes)
+    |
+    +-- _initialize_weights()
+    |       |
+    |       +-- Conv2d weights:
+    |       |       kaiming_normal
+    |       |
+    |       +-- ConvTranspose2d weights:
+    |       |       kaiming_normal
+    |       |
+    |       +-- BatchNorm2d:
+    |               weight = 1
+    |               bias   = 0
+    |
+    +-- forward(x):
+            return self.model(x)
+
+
+========================
+5. Training Loss And Metrics Flow
+========================
+
+Expected training input:
+    images = [B, 3, H, W]
+    masks  = [B, H, W]
+
+Mask rule:
+    every pixel contains one class ID
+    valid class IDs are 0 to NUM_CLASSES - 1
+    ignored pixels use IGNORE_INDEX = 255
+
+
+UNetMulticlassEndToEndModel.train()
+    |
+    +-- logits = UNetMulticlassArchitectureModel(images)
+    |
+    +-- if masks are provided:
+            return UNetLossComputationBlock(logits, masks)
+
+
+UNetLossComputationBlock
+    |
+    +-- self.mask_validation    = MaskValidationBlock
+    +-- self.cross_entropy_loss = CrossEntropySegmentationLossBlock
+    +-- self.pixel_accuracy     = PixelAccuracyBlock
+    +-- self.mean_iou           = MeanIoUBlock
+
+
+UNetLossComputationBlock.forward(logits, masks)
+    |
+    +-- masks = MaskValidationBlock(masks)
+    |
+    +-- loss_ce = CrossEntropySegmentationLossBlock(logits, masks)
+    |
+    +-- accuracy = PixelAccuracyBlock(logits, masks)
+    |
+    +-- miou = MeanIoUBlock(logits, masks)
+    |
+    +-- return:
+            {
+                "loss_total": loss_ce,
+                "loss_ce": loss_ce,
+                "pixel_accuracy": accuracy.detach(),
+                "mean_iou": miou.detach(),
+            }
+
+
+MaskValidationBlock
+    |
+    +-- if mask shape is [B, 1, H, W]:
+    |       squeeze to [B, H, W]
+    |
+    +-- requires mask shape [B, H, W]
+    |
+    +-- converts masks to torch.long if needed
+    |
+    +-- ignores pixels equal to IGNORE_INDEX
+    |
+    +-- validates remaining pixels are in range:
+            0 <= class_id < NUM_CLASSES
+
+
+CrossEntropySegmentationLossBlock
+    |
+    +-- requires logits shape [B, NUM_CLASSES, H, W]
+    +-- requires masks shape [B, H, W]
+    +-- requires same batch size
+    +-- requires same height and width
+    |
+    +-- applies nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
+
+
+PixelAccuracyBlock
+    |
+    +-- predictions = argmax(logits, dim=1)
+    |
+    +-- valid_pixels = masks != IGNORE_INDEX
+    |
+    +-- accuracy = correct_valid_pixels / total_valid_pixels
+
+
+MeanIoUBlock
+    |
+    +-- predictions = argmax(logits, dim=1)
+    |
+    +-- valid_pixels = masks != IGNORE_INDEX
+    |
+    +-- for each class_id from 0 to NUM_CLASSES - 1:
+    |       pred_class = predictions == class_id
+    |       mask_class = masks == class_id
+    |       intersection = pred_class and mask_class
+    |       union = pred_class or mask_class
+    |       iou = intersection / union
+    |
+    +-- mean_iou = average IoU over classes with union > 0
+
+
+========================
+6. Inference And Postprocess Flow
+========================
+
+UNetMulticlassEndToEndModel.eval()
+    |
+    +-- logits = UNetMulticlassArchitectureModel(images)
+    |
+    +-- if masks is None:
+            return UNetPostProcessBlock(logits)
+
+
+UNetPostProcessBlock
+    |
+    +-- probabilities = softmax(logits, dim=1)
+    |
+    +-- predicted_masks = argmax(logits, dim=1)
+    |
+    +-- return:
+            {
+                "logits": logits,
+                "probabilities": probabilities,
+                "predicted_masks": predicted_masks,
+            }
+
+Inference output:
+    logits          = [B, NUM_CLASSES, H, W]
+    probabilities   = [B, NUM_CLASSES, H, W]
+    predicted_masks = [B, H, W]
+
+
+========================
+7. Dataset Flow
+========================
+
+MulticlassSegmentationDataset
+    |
+    +-- image_dir
+    +-- mask_dir
+    +-- image_size
+    +-- num_classes
+    +-- color_to_class
+    +-- ignore_index
+    |
+    +-- scans image files:
+            .jpg, .jpeg, .png, .bmp, .webp
+
+
+Dataset.__getitem__(index)
+    |
+    +-- image_path = image_paths[index]
+    |
+    +-- mask_path = find_mask_path(image_path)
+    |
+    +-- image = load_image(image_path)
+    |
+    +-- mask = load_mask(mask_path)
+    |
+    +-- return image, mask
+
+
+find_mask_path(image_path)
+    |
+    +-- first checks exact mask filename match
+    |
+    +-- then checks same stem with:
+            .png, .jpg, .jpeg, .bmp
+
+
+load_image(image_path)
+    |
+    +-- open image as RGB
+    |
+    +-- resize to [IMAGE_SIZE, IMAGE_SIZE] with bilinear
+    |
+    +-- convert to float32 and scale to [0, 1]
+    |
+    +-- normalize with ImageNet mean and std:
+            mean = [0.485, 0.456, 0.406]
+            std  = [0.229, 0.224, 0.225]
+    |
+    +-- transpose HWC to CHW
+    |
+    +-- return tensor [3, IMAGE_SIZE, IMAGE_SIZE]
+
+
+load_mask(mask_path)
+    |
+    +-- if color_to_class is None:
+    |       open mask
+    |       resize with nearest neighbor
+    |       expects single-channel class-ID mask
+    |
+    +-- if color_to_class is not None:
+    |       open mask as RGB
+    |       resize with nearest neighbor
+    |       RGBMaskToClassIndexBlock converts RGB colors to class IDs
+    |
+    +-- validates class IDs:
+            0 to NUM_CLASSES - 1 or IGNORE_INDEX
+    |
+    +-- return mask tensor [IMAGE_SIZE, IMAGE_SIZE]
+
+
+RGBMaskToClassIndexBlock
+    |
+    +-- input RGB mask = [H, W, 3]
+    |
+    +-- creates class mask filled with IGNORE_INDEX
+    |
+    +-- for each rgb_color -> class_id:
+            matched pixels receive class_id
+
+
+ClassIndexToRGBMaskBlock
+    |
+    +-- input class mask = [H, W]
+    |
+    +-- creates RGB output = [H, W, 3]
+    |
+    +-- for each class_id -> rgb_color:
+            matching class pixels receive RGB color
+
+
+========================
+8. DataLoader And Training Pipeline Flow
+========================
+
+DataLoaderBuilderBlock
+    |
+    +-- receives dataset
+    |
+    +-- requires at least 2 image-mask pairs
+    |
+    +-- splits dataset into:
+    |       train_dataset
+    |       val_dataset
+    |
+    +-- train_loader:
+    |       shuffle=True
+    |       batch_size=BATCH_SIZE
+    |       pin_memory=torch.cuda.is_available()
+    |
+    +-- val_loader:
+            shuffle=False
+            batch_size=BATCH_SIZE
+            pin_memory=torch.cuda.is_available()
+
+
+TrainOneEpochBlock
+    |
+    +-- model.train()
+    |
+    +-- for images, masks in train_loader:
+            move images and masks to device
+            outputs = model(images, masks)
+            loss = outputs["loss_total"]
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            accumulate loss, pixel_accuracy, mean_iou
+
+
+ValidateOneEpochBlock
+    |
+    +-- model.eval()
+    |
+    +-- torch.no_grad()
+    |
+    +-- for images, masks in val_loader:
+            move images and masks to device
+            outputs = model(images, masks)
+            accumulate loss, pixel_accuracy, mean_iou
+
+
+CheckpointSaveBlock
+    |
+    +-- saves:
+            epoch
+            model_state_dict
+            optimizer_state_dict
+            best_miou
+            num_classes
+            ignore_index
+
+
+FullTrainingPipelineBlock
+    |
+    +-- creates MulticlassSegmentationDataset
+    |
+    +-- creates train_loader and val_loader
+    |
+    +-- creates UNetMulticlassEndToEndModel
+    |
+    +-- creates Adam optimizer
+    |
+    +-- creates TrainOneEpochBlock
+    |
+    +-- creates ValidateOneEpochBlock
+    |
+    +-- creates CheckpointSaveBlock
+    |
+    +-- for each epoch:
+            train one epoch
+            validate one epoch
+            print train and validation metrics
+            save checkpoint when validation mean_iou improves
+
+
+SingleImagePredictionBlock
+    |
+    +-- load_image(image_path, device)
+    |       |
+    |       +-- open image as RGB
+    |       +-- remember original size
+    |       +-- resize to IMAGE_SIZE
+    |       +-- normalize image
+    |       +-- return image tensor and original size
+    |
+    +-- model.eval()
+    |
+    +-- outputs = model(image_tensor)
+    |
+    +-- predicted_mask = outputs["predicted_masks"]
+    |
+    +-- resize predicted mask back to original size
+    |
+    +-- save class-ID mask
+    |
+    +-- optionally convert class-ID mask to RGB color mask
+
+
+========================
+9. Complete Forward Summary
+========================
+
+images
+    |
+    v
+InputBlock
+    |
+    v
+EncoderBlock1 -> skip1
+    |
+    v
+DownsampleBlock1
+    |
+    v
+EncoderBlock2 -> skip2
+    |
+    v
+DownsampleBlock2
+    |
+    v
+EncoderBlock3 -> skip3
+    |
+    v
+DownsampleBlock3
+    |
+    v
+EncoderBlock4 -> skip4
+    |
+    v
+DownsampleBlock4
+    |
+    v
+BottleneckBlock
+    |
+    v
+DecoderBlock4 + skip4
+    |
+    v
+DecoderBlock3 + skip3
+    |
+    v
+DecoderBlock2 + skip2
+    |
+    v
+DecoderBlock1 + skip1
+    |
+    v
+OutputBlock
+    |
+    v
+logits
+    |
+    +-- training  -> UNetLossComputationBlock -> loss and metrics
+    |
+    +-- inference -> UNetPostProcessBlock -> probabilities and predicted masks

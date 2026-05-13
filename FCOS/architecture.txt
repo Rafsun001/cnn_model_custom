@@ -1,0 +1,728 @@
+ResNet50EndToEndModel
+    |
+    +-- self.model            = ResNet50FinalBlock
+    +-- self.loss_computation = LossComputationBlock
+    +-- self.postprocess      = PostProcessBlock
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Input = [B, 3, 800, 1024]
+    |
+    v
+ResNet50EndToEndModel
+    |
+    +-- ResNet50FinalBlock
+            |
+            +-- self.backbone = ResNet50BackboneForBlock
+            +-- self.fpn      = FPNBlock
+            +-- self.head     = HeadBlock
+
+
+========================
+1. Backbone Flow
+========================
+
+ResNet50BackboneForBlock
+    |
+    +-- InputBlock
+    |       |
+    |       +-- output = [B, 3, 800, 1024]
+    |
+    +-- ResNet50StemBlock
+    |       |
+    |       +-- conv7x7 stride 2
+    |       +-- batch norm
+    |       +-- relu
+    |       +-- maxpool stride 2
+    |       |
+    |       +-- output = [B, 64, 200, 256]
+    |
+    +-- ResNetStage1Block
+    |       |
+    |       +-- ResidualBlock1
+    |       +-- ResidualBlock2
+    |       +-- ResidualBlock3
+    |       |
+    |       +-- output c2 = [B, 256, 200, 256]
+    |
+    +-- ResNetStage2Block
+    |       |
+    |       +-- ResidualBlock4
+    |       +-- ResidualBlock5
+    |       +-- ResidualBlock6
+    |       +-- ResidualBlock7
+    |       |
+    |       +-- output c3 = [B, 512, 100, 128]
+    |
+    +-- ResNetStage3Block
+    |       |
+    |       +-- ResidualBlock8
+    |       +-- ResidualBlock9
+    |       +-- ResidualBlock10
+    |       +-- ResidualBlock11
+    |       +-- ResidualBlock12
+    |       +-- ResidualBlock13
+    |       |
+    |       +-- output c4 = [B, 1024, 50, 64]
+    |
+    +-- ResNetStage4Block
+            |
+            +-- ResidualBlock14
+            +-- ResidualBlock15
+            +-- ResidualBlock16
+            |
+            +-- output c5 = [B, 2048, 25, 32]
+
+Backbone return:
+    c3 = [B, 512, 100, 128]
+    c4 = [B, 1024, 50, 64]
+    c5 = [B, 2048, 25, 32]
+
+
+========================
+2. Feature Pyramid Flow
+========================
+
+FPNBlock
+    |
+    +-- FPNLateralC3Block
+    |       |
+    |       +-- input  c3 = [B, 512, 100, 128]
+    |       +-- output    = [B, 256, 100, 128]
+    |
+    +-- FPNLateralC4Block
+    |       |
+    |       +-- input  c4 = [B, 1024, 50, 64]
+    |       +-- output    = [B, 256, 50, 64]
+    |
+    +-- FPNLateralC5Block
+    |       |
+    |       +-- input  c5 = [B, 2048, 25, 32]
+    |       +-- output    = [B, 256, 25, 32]
+    |
+    +-- FPNTopDownP5ToP4Block
+    |       |
+    |       +-- p4 = lateral_c4 + upsample(lateral_c5)
+    |
+    +-- FPNTopDownP4ToP3Block
+    |       |
+    |       +-- p3 = lateral_c3 + upsample(p4)
+    |
+    +-- FPNSmoothP3Block
+    |       |
+    |       +-- output p3 = [B, 256, 100, 128]
+    |
+    +-- FPNSmoothP4Block
+    |       |
+    |       +-- output p4 = [B, 256, 50, 64]
+    |
+    +-- FPNSmoothP5Block
+    |       |
+    |       +-- output p5 = [B, 256, 25, 32]
+    |
+    +-- FPNP6Block
+    |       |
+    |       +-- input  p5 = [B, 256, 25, 32]
+    |       +-- output p6 = [B, 256, 13, 16]
+    |
+    +-- FPNP7Block
+            |
+            +-- input  p6 = [B, 256, 13, 16]
+            +-- output p7 = [B, 256, 7, 8]
+
+FPN return:
+    p3 = [B, 256, 100, 128]
+    p4 = [B, 256, 50, 64]
+    p5 = [B, 256, 25, 32]
+    p6 = [B, 256, 13, 16]
+    p7 = [B, 256, 7, 8]
+
+
+========================
+3. Detection Head Flow
+========================
+
+HeadBlock
+    |
+    +-- self.shared_head = SharedHeadBlock
+    |       |
+    |       +-- self.classification_tower = ClassificationTowerBlock
+    |       +-- self.regression_tower     = RegressionTowerBlock
+    |       +-- self.prediction           = PredictionBlock
+    |
+    +-- self.scale_p3 = ScaleP3Block
+    +-- self.scale_p4 = ScaleP4Block
+    +-- self.scale_p5 = ScaleP5Block
+    +-- self.scale_p6 = ScaleP6Block
+    +-- self.scale_p7 = ScaleP7Block
+
+HeadBlock.forward(p3, p4, p5, p6, p7)
+    |
+    +-- p3_cls, p3_ctr, p3_reg = shared_head(p3)
+    +-- p4_cls, p4_ctr, p4_reg = shared_head(p4)
+    +-- p5_cls, p5_ctr, p5_reg = shared_head(p5)
+    +-- p6_cls, p6_ctr, p6_reg = shared_head(p6)
+    +-- p7_cls, p7_ctr, p7_reg = shared_head(p7)
+    |
+    +-- p3_reg = scale_p3(p3_reg)
+    +-- p4_reg = scale_p4(p4_reg)
+    +-- p5_reg = scale_p5(p5_reg)
+    +-- p6_reg = scale_p6(p6_reg)
+    +-- p7_reg = scale_p7(p7_reg)
+    |
+    +-- return predictions dictionary
+
+
+SharedHeadBlock.forward(x)
+    |
+    +-- classification_feature = ClassificationTowerBlock(x)
+    |
+    +-- regression_feature     = RegressionTowerBlock(x)
+    |
+    +-- classification, centerness, regression =
+    |       PredictionBlock(classification_feature, regression_feature)
+    |
+    +-- return classification, centerness, regression
+
+
+ClassificationTowerBlock
+    |
+    +-- input = [B, 256, H, W]
+    |
+    +-- conv1 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn1   = GroupNorm(32, 256)
+    +-- relu1 = ReLU
+    |
+    +-- conv2 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn2   = GroupNorm(32, 256)
+    +-- relu2 = ReLU
+    |
+    +-- conv3 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn3   = GroupNorm(32, 256)
+    +-- relu3 = ReLU
+    |
+    +-- conv4 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn4   = GroupNorm(32, 256)
+    +-- relu4 = ReLU
+    |
+    +-- output classification_feature = [B, 256, H, W]
+
+
+RegressionTowerBlock
+    |
+    +-- input = [B, 256, H, W]
+    |
+    +-- conv1 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn1   = GroupNorm(32, 256)
+    +-- relu1 = ReLU
+    |
+    +-- conv2 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn2   = GroupNorm(32, 256)
+    +-- relu2 = ReLU
+    |
+    +-- conv3 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn3   = GroupNorm(32, 256)
+    +-- relu3 = ReLU
+    |
+    +-- conv4 = Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+    +-- gn4   = GroupNorm(32, 256)
+    +-- relu4 = ReLU
+    |
+    +-- output regression_feature = [B, 256, H, W]
+
+
+PredictionBlock
+    |
+    +-- input classification_feature = [B, 256, H, W]
+    +-- input regression_feature     = [B, 256, H, W]
+    |
+    +-- classification_pred:
+    |       Conv2d(256, NUM_CLASSES, kernel_size=3, stride=1, padding=1)
+    |       output classification = [B, NUM_CLASSES, H, W]
+    |
+    +-- centerness_pred:
+    |       Conv2d(256, 1, kernel_size=3, stride=1, padding=1)
+    |       input comes from classification_feature in current code
+    |       output centerness = [B, 1, H, W]
+    |
+    +-- regression_pred:
+            Conv2d(256, 4, kernel_size=3, stride=1, padding=1)
+            input comes from regression_feature
+            output regression = [B, 4, H, W]
+
+
+Scale blocks
+    |
+    +-- ScaleP3Block: regression = exp(regression * learnable_scale)
+    +-- ScaleP4Block: regression = exp(regression * learnable_scale)
+    +-- ScaleP5Block: regression = exp(regression * learnable_scale)
+    +-- ScaleP6Block: regression = exp(regression * learnable_scale)
+    +-- ScaleP7Block: regression = exp(regression * learnable_scale)
+
+
+Per-level detection head details:
+    P3 input = [B, 256, 100, 128]
+        |
+        +-- shared_head(p3)
+        +-- scale_p3(regression)
+        +-- classification = [B, NUM_CLASSES, 100, 128]
+        +-- centerness     = [B, 1, 100, 128]
+        +-- regression     = [B, 4, 100, 128]
+
+    P4 input = [B, 256, 50, 64]
+        |
+        +-- shared_head(p4)
+        +-- scale_p4(regression)
+        +-- classification = [B, NUM_CLASSES, 50, 64]
+        +-- centerness     = [B, 1, 50, 64]
+        +-- regression     = [B, 4, 50, 64]
+
+    P5 input = [B, 256, 25, 32]
+        |
+        +-- shared_head(p5)
+        +-- scale_p5(regression)
+        +-- classification = [B, NUM_CLASSES, 25, 32]
+        +-- centerness     = [B, 1, 25, 32]
+        +-- regression     = [B, 4, 25, 32]
+
+    P6 input = [B, 256, 13, 16]
+        |
+        +-- shared_head(p6)
+        +-- scale_p6(regression)
+        +-- classification = [B, NUM_CLASSES, 13, 16]
+        +-- centerness     = [B, 1, 13, 16]
+        +-- regression     = [B, 4, 13, 16]
+
+    P7 input = [B, 256, 7, 8]
+        |
+        +-- shared_head(p7)
+        +-- scale_p7(regression)
+        +-- classification = [B, NUM_CLASSES, 7, 8]
+        +-- centerness     = [B, 1, 7, 8]
+        +-- regression     = [B, 4, 7, 8]
+
+Head return:
+    predictions = {
+        "P3": {
+            "classification": [B, NUM_CLASSES, 100, 128],
+            "centerness":     [B, 1, 100, 128],
+            "regression":     [B, 4, 100, 128],
+        },
+        "P4": {
+            "classification": [B, NUM_CLASSES, 50, 64],
+            "centerness":     [B, 1, 50, 64],
+            "regression":     [B, 4, 50, 64],
+        },
+        "P5": {
+            "classification": [B, NUM_CLASSES, 25, 32],
+            "centerness":     [B, 1, 25, 32],
+            "regression":     [B, 4, 25, 32],
+        },
+        "P6": {
+            "classification": [B, NUM_CLASSES, 13, 16],
+            "centerness":     [B, 1, 13, 16],
+            "regression":     [B, 4, 13, 16],
+        },
+        "P7": {
+            "classification": [B, NUM_CLASSES, 7, 8],
+            "centerness":     [B, 1, 7, 8],
+            "regression":     [B, 4, 7, 8],
+        },
+    }
+
+
+========================
+4. Training Flow
+========================
+
+Expected training input:
+    images  = [B, 3, H, W]
+    targets = [
+        {
+            "boxes":  [num_boxes, 4],
+            "labels": [num_boxes],
+        },
+        ...
+    ]
+
+Target box format:
+    boxes[:, 0] = x1
+    boxes[:, 1] = y1
+    boxes[:, 2] = x2
+    boxes[:, 3] = y2
+
+Target label rule:
+    0 is reserved for background inside the training code
+    object labels must be in range [1, NUM_CLASSES]
+
+
+ResNet50EndToEndModel.forward(images, targets)
+    |
+    +-- predictions = self.model(images)
+    |
+    +-- if self.training is True:
+            |
+            +-- if targets is None:
+            |       raise ValueError
+            |
+            +-- return self.loss_computation(predictions, targets)
+
+
+LossComputationBlock
+    |
+    +-- self.location_generator  = AllLevelLocationGeneratorBlock
+    +-- self.target_assigner     = AllImageTargetAssignmentBlock
+    +-- self.flatten_predictions = FlattenAllPredictionsBlock
+    +-- self.focal_loss          = FocalLossBlock
+    +-- self.iou_loss            = IoULossBlock
+    +-- self.centerness_loss     = CenternessLossBlock
+
+
+LossComputationBlock.forward(predictions, targets)
+    |
+    +-- locations_per_level = AllLevelLocationGeneratorBlock(predictions)
+    |
+    +-- locations = concat(locations_per_level)
+    |
+    +-- labels, regression_targets, centerness_targets =
+    |       AllImageTargetAssignmentBlock(locations_per_level, targets)
+    |
+    +-- classification_logits, centerness_logits, regression_distances =
+    |       FlattenAllPredictionsBlock(predictions)
+    |
+    +-- classification_loss =
+    |       FocalLossBlock(classification_logits, labels)
+    |
+    +-- regression_loss =
+    |       IoULossBlock(locations, regression_distances, regression_targets, labels)
+    |
+    +-- centerness_loss =
+    |       CenternessLossBlock(centerness_logits, centerness_targets, labels)
+    |
+    +-- total_loss = classification_loss + regression_loss + centerness_loss
+    |
+    +-- return loss dictionary
+
+
+4.1 Location generation
+
+AllLevelLocationGeneratorBlock
+    |
+    +-- reads levels from ConfigBlock.LEVEL_NAMES:
+    |       ["P3", "P4", "P5", "P6", "P7"]
+    |
+    +-- reads strides from ConfigBlock.STRIDES:
+    |       P3 = 8
+    |       P4 = 16
+    |       P5 = 32
+    |       P6 = 64
+    |       P7 = 128
+    |
+    +-- for each level:
+            |
+            +-- take feature_height and feature_width from classification logits
+            +-- call SingleLevelLocationGeneratorBlock
+            +-- create center point locations for every grid cell
+
+For input [B, 3, 800, 1024]:
+    P3 locations = [100 * 128, 2] = [12800, 2]
+    P4 locations = [50 * 64, 2]   = [3200, 2]
+    P5 locations = [25 * 32, 2]   = [800, 2]
+    P6 locations = [13 * 16, 2]   = [208, 2]
+    P7 locations = [7 * 8, 2]     = [56, 2]
+
+Total locations:
+    12800 + 3200 + 800 + 208 + 56 = 17064
+
+
+4.2 Target assignment
+
+AllImageTargetAssignmentBlock
+    |
+    +-- locations = concat(P3, P4, P5, P6, P7)
+    |
+    +-- regression_ranges = RegressionRangeBuilderBlock(locations_per_level)
+    |
+    +-- for each image target:
+            |
+            +-- SingleImageTargetAssignmentBlock(
+                    locations,
+                    regression_ranges,
+                    target,
+                )
+
+RegressionRangeBuilderBlock
+    |
+    +-- assigns object size ranges per level:
+            P3 = [0, 64]
+            P4 = [64, 128]
+            P5 = [128, 256]
+            P6 = [256, 512]
+            P7 = [512, infinity]
+
+SingleImageTargetAssignmentBlock
+    |
+    +-- starts all locations as background:
+    |       labels             = 0
+    |       regression_targets = [0, 0, 0, 0]
+    |       centerness_targets = 0
+    |
+    +-- validates target boxes and labels
+    |
+    +-- removes invalid boxes where width <= 0 or height <= 0
+    |
+    +-- for every location and every box, computes distances:
+    |       left   = x_location - x1
+    |       top    = y_location - y1
+    |       right  = x2 - x_location
+    |       bottom = y2 - y_location
+    |
+    +-- inside_box:
+    |       location is positive only if all distances are greater than 0
+    |
+    +-- inside_level_range:
+    |       max(left, top, right, bottom) must fit the level range
+    |
+    +-- valid_match:
+    |       inside_box and inside_level_range
+    |
+    +-- if more than one box matches the same location:
+    |       choose the matched box with the smallest area
+    |
+    +-- positive locations receive:
+    |       labels = matched target class
+    |       regression_targets = [left, top, right, bottom]
+    |
+    +-- centerness target:
+            sqrt(
+                min(left, right) / max(left, right)
+                *
+                min(top, bottom) / max(top, bottom)
+            )
+
+Target assignment output:
+    labels             = [B, total_locations]
+    regression_targets = [B, total_locations, 4]
+    centerness_targets = [B, total_locations]
+
+
+4.3 Prediction flattening
+
+FlattenAllPredictionsBlock
+    |
+    +-- loops over levels in this order:
+    |       P3 -> P4 -> P5 -> P6 -> P7
+    |
+    +-- FlattenClassificationBlock
+    |       input  = [B, NUM_CLASSES, H, W]
+    |       output = [B, H * W, NUM_CLASSES]
+    |
+    +-- FlattenCenternessBlock
+    |       input  = [B, 1, H, W]
+    |       output = [B, H * W]
+    |
+    +-- FlattenRegressionBlock
+            input  = [B, 4, H, W]
+            output = [B, H * W, 4]
+
+After concatenating all levels:
+    classification_logits = [B, total_locations, NUM_CLASSES]
+    centerness_logits     = [B, total_locations]
+    regression_distances  = [B, total_locations, 4]
+
+
+4.4 Classification loss
+
+FocalLossBlock
+    |
+    +-- receives:
+    |       classification_logits = [B, total_locations, NUM_CLASSES]
+    |       labels                = [B, total_locations]
+    |
+    +-- creates one-hot class targets for positive labels
+    |
+    +-- background locations stay all-zero
+    |
+    +-- applies sigmoid focal loss:
+            alpha = 0.25
+            gamma = 2.0
+
+Classification loss is normalized by:
+    number of positive locations, clamped to at least 1
+
+
+4.5 Regression loss
+
+IoULossBlock
+    |
+    +-- positive_mask = labels > 0
+    |
+    +-- if no positive locations:
+    |       return zero regression loss
+    |
+    +-- DistanceToBoxBlock:
+    |       converts predicted distances into predicted boxes
+    |       converts target distances into target boxes
+    |
+    +-- AlignedBoxIoUBlock:
+    |       computes IoU between predicted boxes and target boxes
+    |
+    +-- loss = -log(IoU)
+
+Regression loss is normalized by:
+    number of positive locations, clamped to at least 1
+
+
+4.6 Centerness loss
+
+CenternessLossBlock
+    |
+    +-- positive_mask = labels > 0
+    |
+    +-- if no positive locations:
+    |       return zero centerness loss
+    |
+    +-- uses only positive locations
+    |
+    +-- applies binary_cross_entropy_with_logits
+
+Centerness loss is normalized by:
+    number of positive locations, clamped to at least 1
+
+Training output:
+    {
+        "loss_total":      loss_cls + loss_reg + loss_centerness,
+        "loss_cls":        classification loss,
+        "loss_reg":        box regression loss,
+        "loss_centerness": centerness loss,
+    }
+
+
+========================
+5. Inference Flow
+========================
+
+ResNet50EndToEndModel.eval()
+    |
+    +-- predictions = ResNet50FinalBlock(images)
+    |
+    +-- PostProcessBlock
+            |
+            +-- AllLevelLocationGeneratorBlock
+            |
+            +-- SingleImagePostProcessBlock
+                    |
+                    +-- SingleLevelDecodeBlock
+                    |       |
+                    |       +-- DistanceToBoxBlock
+                    |       +-- converts point distances into boxes
+                    |
+                    +-- ClipBoxesToImageBlock
+                    |
+                    +-- RemoveSmallBoxesBlock
+                    |
+                    +-- ClassWiseNMSBlock
+                            |
+                            +-- NMSBlock
+                                    |
+                                    +-- PairwiseBoxIoUBlock
+
+Inference output:
+    detections = [
+        {
+            "boxes":  [N, 4],
+            "scores": [N],
+            "labels": [N],
+        },
+        ...
+    ]
+
+
+========================
+6. Main File Connection
+========================
+
+ResNet50EndToEndModel
+    |
+    +-- ResNet50FinalBlock
+    |       |
+    |       +-- ResNet50BackboneForBlock
+    |       |       |
+    |       |       +-- InputBlock
+    |       |       +-- ResNet50StemBlock
+    |       |       +-- ResNetStage1Block
+    |       |       +-- ResNetStage2Block
+    |       |       +-- ResNetStage3Block
+    |       |       +-- ResNetStage4Block
+    |       |
+    |       +-- FPNBlock
+    |       |       |
+    |       |       +-- FPNLateralC3Block
+    |       |       +-- FPNLateralC4Block
+    |       |       +-- FPNLateralC5Block
+    |       |       +-- FPNTopDownP5ToP4Block
+    |       |       +-- FPNTopDownP4ToP3Block
+    |       |       +-- FPNSmoothP3Block
+    |       |       +-- FPNSmoothP4Block
+    |       |       +-- FPNSmoothP5Block
+    |       |       +-- FPNP6Block
+    |       |       +-- FPNP7Block
+    |       |
+    |       +-- HeadBlock
+    |               |
+    |               +-- SharedHeadBlock
+    |               +-- ScaleP3Block
+    |               +-- ScaleP4Block
+    |               +-- ScaleP5Block
+    |               +-- ScaleP6Block
+    |               +-- ScaleP7Block
+    |
+    +-- LossComputationBlock
+    |
+    +-- PostProcessBlock
+
+
+========================
+7. Complete Forward Summary
+========================
+
+images
+    |
+    v
+InputBlock
+    |
+    v
+ResNet50StemBlock
+    |
+    v
+ResNetStage1Block -> c2
+    |
+    v
+ResNetStage2Block -> c3
+    |
+    v
+ResNetStage3Block -> c4
+    |
+    v
+ResNetStage4Block -> c5
+    |
+    v
+FPNBlock(c3, c4, c5)
+    |
+    +-- p3
+    +-- p4
+    +-- p5
+    +-- p6
+    +-- p7
+    |
+    v
+HeadBlock(p3, p4, p5, p6, p7)
+    |
+    v
+predictions
+    |
+    +-- training   -> LossComputationBlock -> losses
+    |
+    +-- inference  -> PostProcessBlock -> boxes, scores, labels

@@ -6,13 +6,7 @@ from torchvision import transforms
 
 @dataclass
 class ImageProcessingConfig:
-    """
-    ImageNet-style preprocessing for exact ResNet-50 input behavior.
-
-    Original ResNet-50 is normally trained/evaluated with 224x224 input.
-    TinyImageNet images are 64x64, so this pipeline upsizes them to match
-    the exact ResNet-50 input style.
-    """
+    
     image_size: int = 224
     val_resize_size: int = 256
     mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)

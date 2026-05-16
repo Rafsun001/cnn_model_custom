@@ -1,0 +1,385 @@
+YOLO26ExplicitModel
+    |
+    +-- self.model = YOLO26FinalBlock
+            |
+            +-- self.backbone = BackboneStage
+            +-- self.neck     = NeckStage
+            +-- self.head     = HeadStage
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Input = [B, 3, 640, 640]
+    |
+    v
+YOLO26ExplicitModel
+    |
+    +-- YOLO26FinalBlock
+            |
+            +-- BackboneStage
+            +-- NeckStage
+            +-- HeadStage
+
+
+========================
+1. Backbone Flow
+========================
+
+BackboneStage
+    |
+    +-- BackboneInput1
+    |       |
+    |       +-- validates input is [B, 3, H, W]
+    |       +-- output = [B, 3, 640, 640]
+    |
+    +-- conv0 = BackboneConv1
+    |       |
+    |       +-- Conv 3 -> 16, stride 2
+    |       +-- output = [B, 16, 320, 320]
+    |
+    +-- conv1 = BackboneConv2
+    |       |
+    |       +-- Conv 16 -> 32, stride 2
+    |       +-- output = [B, 32, 160, 160]
+    |
+    +-- c3k2_2 = BackboneC3k21
+    |       |
+    |       +-- C3k2 32 -> 64
+    |       +-- output = [B, 64, 160, 160]
+    |
+    +-- conv3 = BackboneConv3
+    |       |
+    |       +-- Conv 64 -> 64, stride 2
+    |       +-- output = [B, 64, 80, 80]
+    |
+    +-- c3k2_4 = BackboneC3k22
+    |       |
+    |       +-- C3k2 64 -> 128
+    |       +-- output p3_backbone = [B, 128, 80, 80]
+    |
+    +-- conv5 = BackboneConv4
+    |       |
+    |       +-- Conv 128 -> 128, stride 2
+    |       +-- output = [B, 128, 40, 40]
+    |
+    +-- c3k2_6 = BackboneC3k23
+    |       |
+    |       +-- C3k2 128 -> 128
+    |       +-- output p4_backbone = [B, 128, 40, 40]
+    |
+    +-- conv7 = BackboneConv5
+    |       |
+    |       +-- Conv 128 -> 256, stride 2
+    |       +-- output = [B, 256, 20, 20]
+    |
+    +-- c3k2_8 = BackboneC3k24
+    |       |
+    |       +-- C3k2 256 -> 256
+    |       +-- output = [B, 256, 20, 20]
+    |
+    +-- sppf9 = BackboneSPPF1
+    |       |
+    |       +-- SPPF 256 -> 256
+    |       +-- output = [B, 256, 20, 20]
+    |
+    +-- c2psa10 = BackboneC2PSA1
+            |
+            +-- split 256 into 128 + 128
+            +-- one branch goes through PSA
+            +-- concat and project back to 256
+            +-- output p5_backbone = [B, 256, 20, 20]
+
+Backbone return:
+    p3_backbone = [B, 128, 80, 80]
+    p4_backbone = [B, 128, 40, 40]
+    p5_backbone = [B, 256, 20, 20]
+
+
+========================
+2. Neck Flow
+========================
+
+NeckStage
+    |
+    +-- Top-down path
+    |
+    +-- upsample11 = NeckUpsample1
+    |       |
+    |       +-- input p5_backbone = [B, 256, 20, 20]
+    |       +-- output = [B, 256, 40, 40]
+    |
+    +-- concat12 = NeckConcat1
+    |       |
+    |       +-- concat upsampled p5 with p4_backbone
+    |       +-- output = [B, 384, 40, 40]
+    |
+    +-- c3k2_13 = NeckC3k21
+    |       |
+    |       +-- C3k2 384 -> 128
+    |       +-- output neck_p4_first = [B, 128, 40, 40]
+    |
+    +-- upsample14 = NeckUpsample2
+    |       |
+    |       +-- output = [B, 128, 80, 80]
+    |
+    +-- concat15 = NeckConcat2
+    |       |
+    |       +-- concat upsampled neck_p4_first with p3_backbone
+    |       +-- output = [B, 256, 80, 80]
+    |
+    +-- c3k2_16 = NeckC3k22
+    |       |
+    |       +-- C3k2 256 -> 64
+    |       +-- output p3 = [B, 64, 80, 80]
+    |
+    +-- Bottom-up path
+    |
+    +-- conv17 = NeckConv1
+    |       |
+    |       +-- Conv 64 -> 64, stride 2
+    |       +-- output = [B, 64, 40, 40]
+    |
+    +-- concat18 = NeckConcat3
+    |       |
+    |       +-- concat downsampled p3 with neck_p4_first
+    |       +-- output = [B, 192, 40, 40]
+    |
+    +-- c3k2_19 = NeckC3k23
+    |       |
+    |       +-- C3k2 192 -> 128
+    |       +-- output p4 = [B, 128, 40, 40]
+    |
+    +-- conv20 = NeckConv2
+    |       |
+    |       +-- Conv 128 -> 128, stride 2
+    |       +-- output = [B, 128, 20, 20]
+    |
+    +-- concat21 = NeckConcat4
+    |       |
+    |       +-- concat downsampled p4 with p5_backbone
+    |       +-- output = [B, 384, 20, 20]
+    |
+    +-- c3k2_22 = NeckC3k24
+            |
+            +-- C3k2 384 -> 256
+            +-- output p5 = [B, 256, 20, 20]
+
+Neck return:
+    p3 = [B, 64, 80, 80]
+    p4 = [B, 128, 40, 40]
+    p5 = [B, 256, 20, 20]
+
+
+========================
+3. Detection Head Flow
+========================
+
+HeadStage
+    |
+    +-- detect23 = HeadDetect1
+            |
+            +-- detect_p3 = HeadDetectP3
+            +-- detect_p4 = HeadDetectP4
+            +-- detect_p5 = HeadDetectP5
+
+HeadDetectP3
+    |
+    +-- input p3 = [B, 64, 80, 80]
+    +-- one2many_box + one2many_cls
+    +-- one2one_box + one2one_cls
+    +-- output one2many = [B, 84, 80, 80]
+    +-- output one2one  = [B, 84, 80, 80]
+
+HeadDetectP4
+    |
+    +-- input p4 = [B, 128, 40, 40]
+    +-- output one2many = [B, 84, 40, 40]
+    +-- output one2one  = [B, 84, 40, 40]
+
+HeadDetectP5
+    |
+    +-- input p5 = [B, 256, 20, 20]
+    +-- output one2many = [B, 84, 20, 20]
+    +-- output one2one  = [B, 84, 20, 20]
+
+84 output channels:
+    4 box distances + 80 class logits
+
+
+========================
+4. Training Output
+========================
+
+When model.training is True:
+
+YOLO26ExplicitModel.forward(images)
+    |
+    +-- return {
+            "one2many": [
+                [B, 84, 80, 80],
+                [B, 84, 40, 40],
+                [B, 84, 20, 20],
+            ],
+            "one2one": [
+                [B, 84, 80, 80],
+                [B, 84, 40, 40],
+                [B, 84, 20, 20],
+            ],
+        }
+
+
+========================
+5. Eval / Inference Output
+========================
+
+When model.training is False:
+
+YOLO26ExplicitModel.forward(images)
+    |
+    +-- HeadDetect1 decodes one2one branch
+    +-- official-style top-k postprocess without NMS
+    +-- return detections = [B, 300, 6]
+
+Detection format:
+    [x1, y1, x2, y2, score, class_id]
+
+Raw predictions are available in eval mode:
+
+YOLO26ExplicitModel.forward(images, raw=True)
+    |
+    +-- return raw dual-head dictionary
+
+
+========================
+6. Loss Flow
+========================
+
+YOLO26DetectionLoss
+    |
+    +-- expects predictions dictionary:
+    |       "one2many" and "one2one"
+    |
+    +-- decodes each branch into:
+    |       pred_boxes   = [B, N, 4]
+    |       class_logits = [B, N, 80]
+    |       anchor_points = [N, 2]
+    |
+    +-- STALAssigner
+    |       |
+    |       +-- one2many assignment uses topk_one2many
+    |       +-- one2one assignment uses topk_one2one
+    |       +-- small/tiny object weighting
+    |
+    +-- class loss:
+    |       binary_cross_entropy_with_logits
+    |
+    +-- box loss:
+            complete_iou_loss on positive anchors
+
+Loss output:
+    {
+        "loss": total weighted loss,
+        "box_loss": averaged box loss,
+        "class_loss": averaged class loss,
+        "positive_count": positive anchors,
+        "one2many_loss": dense branch loss,
+        "one2one_loss": one-to-one branch loss,
+    }
+
+
+========================
+7. Dataset / Training Flow
+========================
+
+Expected dataset layout:
+    data_root/
+        images/
+            train/
+            val/
+        labels/
+            train/
+            val/
+
+Label format:
+    class_id cx cy w h
+
+Label coordinates:
+    normalized YOLO xywh values in [0, 1]
+
+YoloV26DataModule
+    |
+    +-- YoloV26DetectionDataset(train)
+    +-- YoloV26DetectionDataset(val)
+    +-- collate_fn returns:
+            images  = [B, 3, 640, 640]
+            targets = list of [num_objects, 5]
+
+Target format after processing:
+    [class_id, x1, y1, x2, y2]
+    pixel coordinates at image_size = 640
+
+run_training.py
+    |
+    +-- YoloV26ImageProcessor
+    +-- YoloV26DataModule
+    +-- YOLO26ExplicitModel
+    +-- YoloV26Trainer
+            |
+            +-- YOLO26DetectionLoss
+            +-- MuSGD or SGD
+            +-- optional AMP
+            +-- warmup + cosine schedule
+            +-- validation with raw predictions for loss
+            +-- validation detections for precision/recall metrics
+            +-- checkpoint saving
+            +-- metrics CSV writing
+
+
+========================
+8. Complete Forward Summary
+========================
+
+images
+    |
+    v
+BackboneStage
+    |
+    +-- p3_backbone
+    +-- p4_backbone
+    +-- p5_backbone
+    |
+    v
+NeckStage
+    |
+    +-- p3
+    +-- p4
+    +-- p5
+    |
+    v
+HeadStage
+    |
+    +-- training -> raw one2many and one2one predictions
+    |
+    +-- eval -> decoded detections [B, 300, 6]
+
+
+========================
+9. Verification Command
+========================
+
+python .\YoloV26\verify_architecture.py
+
+Expected verified output:
+    train one2many:
+        [B, 84, 80, 80]
+        [B, 84, 40, 40]
+        [B, 84, 20, 20]
+    train one2one:
+        [B, 84, 80, 80]
+        [B, 84, 40, 40]
+        [B, 84, 20, 20]
+    eval detections:
+        [B, 300, 6]
+    fused eval detections:
+        [B, 300, 6]

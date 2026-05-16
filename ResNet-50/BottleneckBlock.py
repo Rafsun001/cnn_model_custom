@@ -3,18 +3,7 @@ import torch.nn as nn
 
 
 class BottleneckBlock(nn.Module):
-    """
-    Exact ResNet bottleneck block style.
-
-    Structure:
-        1x1 conv -> 3x3 conv -> 1x1 conv
-
-    Expansion:
-        output_channels = bottleneck_channels * 4
-
-    This version places downsampling stride in conv1, matching the
-    original ResNet bottleneck design from the paper-style architecture.
-    """
+    
     expansion = 4
 
     def __init__(

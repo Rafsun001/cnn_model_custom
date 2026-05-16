@@ -7,30 +7,7 @@ from BottleneckBlock import BottleneckBlock
 
 
 class ResNet50(nn.Module):
-    """
-    Exact ResNet-50 backbone structure.
-
-    Architecture:
-        Stem:
-            7x7 conv, stride 2, padding 3
-            BatchNorm
-            ReLU
-            3x3 maxpool, stride 2, padding 1
-
-        Residual stages:
-            conv2_x: 3 bottleneck blocks,  output 256 channels
-            conv3_x: 4 bottleneck blocks,  output 512 channels
-            conv4_x: 6 bottleneck blocks,  output 1024 channels
-            conv5_x: 3 bottleneck blocks,  output 2048 channels
-
-        Head:
-            AdaptiveAvgPool2d
-            Linear classifier
-
-    For TinyImageNet, use num_classes=200.
-    For ImageNet-1K, use num_classes=1000.
-    """
-
+    
     def __init__(self, num_classes: int = 200):
         super().__init__()
 
@@ -143,9 +120,7 @@ class ResNet50(nn.Module):
 
 
 class ResNet50TinyImageNet200(ResNet50):
-    """
-    Backward-compatible class name for your existing training code.
-    """
+    
     def __init__(self, num_classes: int = 200):
         super().__init__(num_classes=num_classes)
 

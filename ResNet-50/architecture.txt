@@ -1,0 +1,422 @@
+ResNet50
+    |
+    +-- self.conv1   = Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+    +-- self.bn1     = BatchNorm2d(64)
+    +-- self.relu    = ReLU
+    +-- self.maxpool = MaxPool2d(kernel_size=3, stride=2, padding=1)
+    +-- self.stage1  = conv2_x, BottleneckBlock x3
+    +-- self.stage2  = conv3_x, BottleneckBlock x4
+    +-- self.stage3  = conv4_x, BottleneckBlock x6
+    +-- self.stage4  = conv5_x, BottleneckBlock x3
+    +-- self.avgpool = AdaptiveAvgPool2d(1)
+    +-- self.fc      = Linear(2048, num_classes)
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Input = [B, 3, 224, 224]
+    |
+    v
+ResNet50
+    |
+    +-- standard ImageNet-style ResNet-50 backbone
+    +-- configurable classifier head
+    +-- for Tiny ImageNet training: num_classes = 200
+
+
+========================
+1. Stem Flow
+========================
+
+Input
+    |
+    +-- input = [B, 3, 224, 224]
+    |
+    +-- conv1:
+    |       Conv2d(
+    |           in_channels=3,
+    |           out_channels=64,
+    |           kernel_size=7,
+    |           stride=2,
+    |           padding=3,
+    |           bias=False,
+    |       )
+    |       output = [B, 64, 112, 112]
+    |
+    +-- bn1:
+    |       BatchNorm2d(64)
+    |       output = [B, 64, 112, 112]
+    |
+    +-- relu:
+    |       ReLU(inplace=True)
+    |       output = [B, 64, 112, 112]
+    |
+    +-- maxpool:
+            MaxPool2d(kernel_size=3, stride=2, padding=1)
+            output = [B, 64, 56, 56]
+
+
+========================
+2. Residual Stage Flow
+========================
+
+Stage1 / conv2_x
+    |
+    +-- input = [B, 64, 56, 56]
+    |
+    +-- BottleneckBlock 1:
+    |       in_channels = 64
+    |       bottleneck_channels = 64
+    |       output_channels = 256
+    |       stride = 1
+    |       projection shortcut: yes, 64 -> 256
+    |
+    +-- BottleneckBlock 2:
+    |       in_channels = 256
+    |       bottleneck_channels = 64
+    |       output_channels = 256
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 3:
+    |       in_channels = 256
+    |       bottleneck_channels = 64
+    |       output_channels = 256
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- output = [B, 256, 56, 56]
+
+
+Stage2 / conv3_x
+    |
+    +-- input = [B, 256, 56, 56]
+    |
+    +-- BottleneckBlock 1:
+    |       in_channels = 256
+    |       bottleneck_channels = 128
+    |       output_channels = 512
+    |       stride = 2
+    |       projection shortcut: yes, 256 -> 512 with spatial downsample
+    |
+    +-- BottleneckBlock 2:
+    |       in_channels = 512
+    |       bottleneck_channels = 128
+    |       output_channels = 512
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 3:
+    |       in_channels = 512
+    |       bottleneck_channels = 128
+    |       output_channels = 512
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 4:
+    |       in_channels = 512
+    |       bottleneck_channels = 128
+    |       output_channels = 512
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- output = [B, 512, 28, 28]
+
+
+Stage3 / conv4_x
+    |
+    +-- input = [B, 512, 28, 28]
+    |
+    +-- BottleneckBlock 1:
+    |       in_channels = 512
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 2
+    |       projection shortcut: yes, 512 -> 1024 with spatial downsample
+    |
+    +-- BottleneckBlock 2:
+    |       in_channels = 1024
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 3:
+    |       in_channels = 1024
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 4:
+    |       in_channels = 1024
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 5:
+    |       in_channels = 1024
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 6:
+    |       in_channels = 1024
+    |       bottleneck_channels = 256
+    |       output_channels = 1024
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- output = [B, 1024, 14, 14]
+
+
+Stage4 / conv5_x
+    |
+    +-- input = [B, 1024, 14, 14]
+    |
+    +-- BottleneckBlock 1:
+    |       in_channels = 1024
+    |       bottleneck_channels = 512
+    |       output_channels = 2048
+    |       stride = 2
+    |       projection shortcut: yes, 1024 -> 2048 with spatial downsample
+    |
+    +-- BottleneckBlock 2:
+    |       in_channels = 2048
+    |       bottleneck_channels = 512
+    |       output_channels = 2048
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- BottleneckBlock 3:
+    |       in_channels = 2048
+    |       bottleneck_channels = 512
+    |       output_channels = 2048
+    |       stride = 1
+    |       projection shortcut: no
+    |
+    +-- output = [B, 2048, 7, 7]
+
+
+========================
+3. BottleneckBlock Flow
+========================
+
+BottleneckBlock.forward(x)
+    |
+    +-- identity = downsample(x)
+    |       |
+    |       +-- if stride != 1 or in_channels != output_channels:
+    |       |       Conv2d(in_channels, output_channels, kernel_size=1, stride=stride)
+    |       |       BatchNorm2d(output_channels)
+    |       |
+    |       +-- else:
+    |               Identity
+    |
+    +-- main path:
+    |       |
+    |       +-- conv1:
+    |       |       Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride)
+    |       |       BatchNorm2d(bottleneck_channels)
+    |       |       ReLU
+    |       |
+    |       +-- conv2:
+    |       |       Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=3, stride=1, padding=1)
+    |       |       BatchNorm2d(bottleneck_channels)
+    |       |       ReLU
+    |       |
+    |       +-- conv3:
+    |               Conv2d(bottleneck_channels, output_channels, kernel_size=1, stride=1)
+    |               BatchNorm2d(output_channels)
+    |
+    +-- out = main path + identity
+    +-- out = ReLU(out)
+    |
+    +-- return out
+
+Bottleneck expansion:
+    output_channels = bottleneck_channels * 4
+
+Downsampling rule in this implementation:
+    stride is applied in conv1 and in the projection shortcut.
+
+
+========================
+4. Classifier Flow
+========================
+
+Classifier head
+    |
+    +-- input = [B, 2048, 7, 7]
+    |
+    +-- avgpool:
+    |       AdaptiveAvgPool2d((1, 1))
+    |       output = [B, 2048, 1, 1]
+    |
+    +-- flatten:
+    |       torch.flatten(x, 1)
+    |       output = [B, 2048]
+    |
+    +-- fc:
+            Linear(2048, num_classes)
+            output logits = [B, num_classes]
+
+For Tiny ImageNet:
+    num_classes = 200
+    output logits = [B, 200]
+
+For ImageNet-1K:
+    num_classes = 1000
+    output logits = [B, 1000]
+
+
+========================
+5. Tensor Shape Summary
+========================
+
+For input [B, 3, 224, 224]:
+
+    conv1       = [B, 64, 112, 112]
+    bn1 + relu  = [B, 64, 112, 112]
+    maxpool     = [B, 64, 56, 56]
+    stage1      = [B, 256, 56, 56]
+    stage2      = [B, 512, 28, 28]
+    stage3      = [B, 1024, 14, 14]
+    stage4      = [B, 2048, 7, 7]
+    avgpool     = [B, 2048, 1, 1]
+    flatten     = [B, 2048]
+    fc          = [B, num_classes]
+
+
+========================
+6. Main File Connection
+========================
+
+model.py
+    |
+    +-- ResNet50
+    |       |
+    |       +-- imports BottleneckBlock
+    |       +-- builds stage1 through _make_stage(64, 3, stride=1)
+    |       +-- builds stage2 through _make_stage(128, 4, stride=2)
+    |       +-- builds stage3 through _make_stage(256, 6, stride=2)
+    |       +-- builds stage4 through _make_stage(512, 3, stride=2)
+    |
+    +-- ResNet50TinyImageNet200
+    |       |
+    |       +-- backward-compatible subclass of ResNet50
+    |
+    +-- resnet50(num_classes=200)
+            |
+            +-- factory function returning ResNet50
+
+Note:
+    Stage1.py to Stage4.py and ResidualBlock1.py to ResidualBlock16.py are
+    explicit legacy/reference files in this folder. The active model path uses
+    BottleneckBlock.py and _make_stage inside model.py.
+
+
+========================
+7. Training Flow
+========================
+
+run_training.py
+    |
+    +-- set_global_seed(seed)
+    |
+    +-- ImageProcessingConfig
+    |       |
+    |       +-- image_size = 224
+    |       +-- val_resize_size = 256
+    |       +-- ImageNet mean/std normalization
+    |
+    +-- TinyImageNetDataModule
+    |       |
+    |       +-- TinyImageNetTrainDataset
+    |       +-- TinyImageNetValDataset
+    |       +-- train_loader
+    |       +-- val_loader
+    |
+    +-- ResNet50(num_classes=200)
+    |
+    +-- TrainingConfig
+    |       |
+    |       +-- epochs = 100
+    |       +-- optimizer = SGD
+    |       +-- learning_rate = 0.025
+    |       +-- momentum = 0.9
+    |       +-- weight_decay = 1e-4
+    |       +-- warmup + cosine learning-rate schedule
+    |       +-- optional AMP
+    |
+    +-- Trainer
+            |
+            +-- train_one_epoch
+            +-- Evaluator.evaluate
+            +-- save best_model.pth
+            +-- save latest_checkpoint.pth
+            +-- write metrics.csv
+
+
+========================
+8. Complete Forward Summary
+========================
+
+images
+    |
+    v
+conv1 7x7 stride 2
+    |
+    v
+BatchNorm2d + ReLU
+    |
+    v
+MaxPool2d 3x3 stride 2
+    |
+    v
+stage1 / conv2_x: BottleneckBlock x3
+    |
+    v
+stage2 / conv3_x: BottleneckBlock x4
+    |
+    v
+stage3 / conv4_x: BottleneckBlock x6
+    |
+    v
+stage4 / conv5_x: BottleneckBlock x3
+    |
+    v
+AdaptiveAvgPool2d
+    |
+    v
+Flatten
+    |
+    v
+Linear classifier
+    |
+    v
+class logits
+
+
+========================
+9. Verification Command
+========================
+
+python .\ResNet-50\verify_architecture.py
+
+Expected verified output:
+    input    = [2, 3, 224, 224]
+    conv1    = [2, 64, 112, 112]
+    maxpool  = [2, 64, 56, 56]
+    stage1   = [2, 256, 56, 56]
+    stage2   = [2, 512, 28, 28]
+    stage3   = [2, 1024, 14, 14]
+    stage4   = [2, 2048, 7, 7]
+    avgpool  = [2, 2048, 1, 1]
+    output   = [2, 200]
+
+Parameter count with num_classes=200:
+    23,917,832

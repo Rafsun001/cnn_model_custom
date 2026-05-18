@@ -1,0 +1,505 @@
+DeepLabV3PlusResNet50
+    |
+    +-- self.backbone = ResNet50BackboneForDeepLabV3Plus
+    +-- self.aspp     = ASPP
+    +-- self.decoder  = DeepLabV3PlusDecoder
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Input = [B, 3, 224, 224]
+    |
+    v
+DeepLabV3PlusResNet50
+    |
+    +-- ResNet50BackboneForDeepLabV3Plus
+    |       |
+    |       +-- returns:
+    |               low_level_feature  = [B, 256, 56, 56]
+    |               high_level_feature = [B, 2048, 14, 14]
+    |
+    +-- ASPP
+    |       |
+    |       +-- output encoder_output = [B, 256, 14, 14]
+    |
+    +-- DeepLabV3PlusDecoder
+            |
+            +-- output decoder_logits = [B, NUM_CLASSES, 56, 56]
+            +-- final upsample        = [B, NUM_CLASSES, 224, 224]
+
+
+========================
+1. Backbone Flow
+========================
+
+ResNet50BackboneForDeepLabV3Plus
+    |
+    +-- ResNet50Stem
+    |       |
+    |       +-- input = [B, 3, 224, 224]
+    |       |
+    |       +-- conv7x7 stride 2
+    |       +-- batch norm
+    |       +-- relu
+    |       +-- maxpool stride 2
+    |       |
+    |       +-- output = [B, 64, 56, 56]
+    |
+    +-- ResNet50Stage1
+    |       |
+    |       +-- ResNet50Stage1Block1
+    |       |       |
+    |       |       +-- bottleneck: 64 -> 64 -> 256
+    |       |       +-- shortcut: 64 -> 256
+    |       |
+    |       +-- ResNet50Stage1Block2
+    |       |       |
+    |       |       +-- bottleneck: 256 -> 64 -> 256
+    |       |       +-- identity shortcut
+    |       |
+    |       +-- ResNet50Stage1Block3
+    |       |       |
+    |       |       +-- bottleneck: 256 -> 64 -> 256
+    |       |       +-- identity shortcut
+    |       |
+    |       +-- output low_level_feature = [B, 256, 56, 56]
+    |
+    +-- ResNet50Stage2
+    |       |
+    |       +-- ResNet50Stage2Block1
+    |       |       |
+    |       |       +-- bottleneck: 256 -> 128 -> 512
+    |       |       +-- stride 2 downsample
+    |       |       +-- shortcut: 256 -> 512, stride 2
+    |       |
+    |       +-- ResNet50Stage2Block2
+    |       +-- ResNet50Stage2Block3
+    |       +-- ResNet50Stage2Block4
+    |       |
+    |       +-- output = [B, 512, 28, 28]
+    |
+    +-- ResNet50Stage3
+    |       |
+    |       +-- ResNet50Stage3Block1
+    |       |       |
+    |       |       +-- bottleneck: 512 -> 256 -> 1024
+    |       |       +-- stride 2 downsample
+    |       |       +-- shortcut: 512 -> 1024, stride 2
+    |       |
+    |       +-- ResNet50Stage3Block2
+    |       +-- ResNet50Stage3Block3
+    |       +-- ResNet50Stage3Block4
+    |       +-- ResNet50Stage3Block5
+    |       +-- ResNet50Stage3Block6
+    |       |
+    |       +-- output = [B, 1024, 14, 14]
+    |
+    +-- ResNet50Stage4
+            |
+            +-- ResNet50Stage4Block1
+            |       |
+            |       +-- bottleneck: 1024 -> 512 -> 2048
+            |       +-- stride 1
+            |       +-- 3x3 conv dilation 2, padding 2
+            |       +-- shortcut: 1024 -> 2048, stride 1
+            |
+            +-- ResNet50Stage4Block2
+            |       |
+            |       +-- bottleneck: 2048 -> 512 -> 2048
+            |       +-- stride 1
+            |       +-- 3x3 conv dilation 2, padding 2
+            |       +-- identity shortcut
+            |
+            +-- ResNet50Stage4Block3
+                    |
+                    +-- same structure as ResNet50Stage4Block2
+                    +-- output high_level_feature = [B, 2048, 14, 14]
+
+Backbone return:
+    low_level_feature  = [B, 256, 56, 56]
+    high_level_feature = [B, 2048, 14, 14]
+
+Backbone output stride:
+    stem     = /4
+    stage1   = /4
+    stage2   = /8
+    stage3   = /16
+    stage4   = /16
+
+
+========================
+2. ASPP Flow
+========================
+
+ASPP
+    |
+    +-- input high_level_feature = [B, 2048, 14, 14]
+    |
+    +-- ASPPBranch1x1Conv
+    |       |
+    |       +-- Conv2d(2048, 256, kernel_size=1)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- output = [B, 256, 14, 14]
+    |
+    +-- ASPPBranchAtrousRate6
+    |       |
+    |       +-- Conv2d(2048, 256, kernel_size=3, padding=6, dilation=6)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- output = [B, 256, 14, 14]
+    |
+    +-- ASPPBranchAtrousRate12
+    |       |
+    |       +-- Conv2d(2048, 256, kernel_size=3, padding=12, dilation=12)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- output = [B, 256, 14, 14]
+    |
+    +-- ASPPBranchAtrousRate18
+    |       |
+    |       +-- Conv2d(2048, 256, kernel_size=3, padding=18, dilation=18)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- output = [B, 256, 14, 14]
+    |
+    +-- ASPPImagePoolingBranch
+    |       |
+    |       +-- AdaptiveAvgPool2d(1, 1)
+    |       +-- output = [B, 2048, 1, 1]
+    |       +-- Conv2d(2048, 256, kernel_size=1)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- bilinear upsample to [14, 14]
+    |       +-- output = [B, 256, 14, 14]
+    |
+    +-- concatenate five branches along channel dimension
+    |       |
+    |       +-- output = [B, 1280, 14, 14]
+    |
+    +-- ASPPProjectionConv
+            |
+            +-- Conv2d(1280, 256, kernel_size=1)
+            +-- BatchNorm2d(256)
+            +-- ReLU
+            +-- Dropout(p=0.5)
+            +-- output encoder_output = [B, 256, 14, 14]
+
+
+========================
+3. Decoder Flow
+========================
+
+DeepLabV3PlusDecoder
+    |
+    +-- input encoder_output    = [B, 256, 14, 14]
+    +-- input low_level_feature = [B, 256, 56, 56]
+    |
+    +-- DecoderLowLevelProjection
+    |       |
+    |       +-- Conv2d(256, 48, kernel_size=1)
+    |       +-- BatchNorm2d(48)
+    |       +-- ReLU
+    |       +-- output processed_low_level_feature = [B, 48, 56, 56]
+    |
+    +-- upsample encoder_output to low-level spatial size
+    |       |
+    |       +-- output upsampled_encoder_output = [B, 256, 56, 56]
+    |
+    +-- concatenate features
+    |       |
+    |       +-- [B, 256, 56, 56] + [B, 48, 56, 56]
+    |       +-- output concatenated_feature = [B, 304, 56, 56]
+    |
+    +-- DecoderConvBlock1
+    |       |
+    |       +-- Conv2d(304, 256, kernel_size=3, padding=1)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- Dropout(p=0.5)
+    |       +-- output = [B, 256, 56, 56]
+    |
+    +-- DecoderConvBlock2
+    |       |
+    |       +-- Conv2d(256, 256, kernel_size=3, padding=1)
+    |       +-- BatchNorm2d(256)
+    |       +-- ReLU
+    |       +-- Dropout(p=0.1)
+    |       +-- output = [B, 256, 56, 56]
+    |
+    +-- DecoderClassifier
+            |
+            +-- Conv2d(256, NUM_CLASSES, kernel_size=1)
+            +-- output decoder_logits = [B, NUM_CLASSES, 56, 56]
+
+
+========================
+4. Full Forward Flow
+========================
+
+DeepLabV3PlusResNet50.forward(images)
+    |
+    +-- input_spatial_size = images.shape[2:]
+    |
+    +-- low_level_feature, high_level_feature =
+    |       ResNet50BackboneForDeepLabV3Plus(images)
+    |
+    +-- encoder_output = ASPP(high_level_feature)
+    |
+    +-- decoder_output =
+    |       DeepLabV3PlusDecoder(
+    |           encoder_output,
+    |           low_level_feature,
+    |       )
+    |
+    +-- final_output = bilinear upsample decoder_output to input_spatial_size
+    |
+    +-- return final_output
+
+For input [B, 3, 224, 224]:
+    final_output = [B, NUM_CLASSES, 224, 224]
+
+For general input [B, 3, H, W]:
+    final_output = [B, NUM_CLASSES, H, W]
+
+
+========================
+5. Training Data Flow
+========================
+
+Expected segmentation dataset:
+    train images = data/train/images
+    train masks  = data/train/masks
+    val images   = data/val/images
+    val masks    = data/val/masks
+
+Expected image format:
+    image = RGB image
+    image tensor = [3, IMAGE_SIZE, IMAGE_SIZE]
+
+Expected mask format:
+    mask = single-channel class-index image
+    mask tensor = [IMAGE_SIZE, IMAGE_SIZE]
+    each pixel value is a class id
+    ignore_index = 255
+
+SegmentationDataset
+    |
+    +-- collect image files:
+    |       .jpg, .jpeg, .png, .bmp
+    |
+    +-- match each image to a mask with the same filename stem
+    |
+    +-- load image as RGB
+    |
+    +-- keep mask as class-index image
+    |
+    +-- apply train or validation transform
+
+
+========================
+6. Training Transform Flow
+========================
+
+SegmentationTrainTransform
+    |
+    +-- input image, mask
+    |
+    +-- random_scale
+    |       |
+    |       +-- scale range = 0.5 to 2.0
+    |       +-- image resize = bilinear
+    |       +-- mask resize  = nearest
+    |
+    +-- pad_if_needed
+    |       |
+    |       +-- pad image with 0
+    |       +-- pad mask with ignore_index
+    |
+    +-- random_crop
+    |       |
+    |       +-- crop to IMAGE_SIZE x IMAGE_SIZE
+    |
+    +-- random_horizontal_flip
+    |       |
+    |       +-- probability = 0.5
+    |
+    +-- to_tensor_and_normalize
+            |
+            +-- image normalization:
+            |       mean = [0.485, 0.456, 0.406]
+            |       std  = [0.229, 0.224, 0.225]
+            |
+            +-- image_tensor = [3, IMAGE_SIZE, IMAGE_SIZE]
+            +-- mask_tensor  = [IMAGE_SIZE, IMAGE_SIZE]
+
+
+========================
+7. Validation Transform Flow
+========================
+
+SegmentationValTransform
+    |
+    +-- input image, mask
+    |
+    +-- resize_preserve_aspect_ratio_and_pad
+    |       |
+    |       +-- preserve original aspect ratio
+    |       +-- fit image inside IMAGE_SIZE x IMAGE_SIZE
+    |       +-- pad image with 0
+    |       +-- pad mask with ignore_index
+    |
+    +-- to_tensor_and_normalize
+            |
+            +-- image_tensor = [3, IMAGE_SIZE, IMAGE_SIZE]
+            +-- mask_tensor  = [IMAGE_SIZE, IMAGE_SIZE]
+
+
+========================
+8. Trainer Flow
+========================
+
+DeepLabV3PlusTrainer
+    |
+    +-- device = cuda if available else cpu
+    |
+    +-- criterion = CrossEntropyLoss(ignore_index=255)
+    |
+    +-- optimizer = SGD
+    |       |
+    |       +-- learning_rate = 0.01
+    |       +-- momentum = 0.9
+    |       +-- weight_decay = 1e-4
+    |
+    +-- scheduler = LambdaLR with polynomial decay
+    |
+    +-- AMP enabled only on CUDA when use_amp is True
+    |
+    +-- best_miou starts at 0.0
+
+
+Training loop:
+    for epoch in range(1, EPOCHS + 1):
+        |
+        +-- train_one_epoch
+        |       |
+        |       +-- model.train()
+        |       +-- optional freeze BatchNorm layers
+        |       +-- logits = model(images)
+        |       +-- loss = CrossEntropyLoss(logits, masks)
+        |       +-- backward
+        |       +-- optimizer step
+        |
+        +-- validate
+        |       |
+        |       +-- model.eval()
+        |       +-- logits = model(images)
+        |       +-- val loss = CrossEntropyLoss(logits, masks)
+        |       +-- update SegmentationMetrics
+        |
+        +-- scheduler.step()
+        |
+        +-- save latest checkpoint
+        |
+        +-- if val_miou improves:
+                |
+                +-- save best checkpoint
+
+
+========================
+9. Metrics Flow
+========================
+
+SegmentationMetrics
+    |
+    +-- receives:
+    |       logits  = [B, NUM_CLASSES, H, W]
+    |       targets = [B, H, W]
+    |
+    +-- predictions = argmax(logits, dim=1)
+    |
+    +-- valid pixels:
+    |       target != ignore_index
+    |       target >= 0
+    |       target < NUM_CLASSES
+    |
+    +-- build confusion matrix:
+    |       shape = [NUM_CLASSES, NUM_CLASSES]
+    |
+    +-- compute:
+            |
+            +-- pixel_accuracy
+            +-- mean_iou
+            +-- class_iou
+
+
+========================
+10. Main File Connection
+========================
+
+main.py
+    |
+    +-- TrainingConfig
+    |       |
+    |       +-- train_images_dir
+    |       +-- train_masks_dir
+    |       +-- val_images_dir
+    |       +-- val_masks_dir
+    |       +-- num_classes
+    |       +-- ignore_index
+    |       +-- image_size
+    |       +-- batch_size
+    |       +-- epochs
+    |       +-- learning_rate
+    |       +-- checkpoint_dir
+    |
+    +-- set_global_seed
+    |
+    +-- SegmentationDataModule
+    |       |
+    |       +-- train_loader
+    |       +-- val_loader
+    |
+    +-- DeepLabV3PlusResNet50
+    |
+    +-- DeepLabV3PlusTrainer
+    |
+    +-- trainer.fit(train_loader, val_loader)
+
+
+========================
+11. Complete Forward Summary
+========================
+
+images
+    |
+    v
+ResNet50Stem
+    |
+    v
+ResNet50Stage1 -> low_level_feature
+    |
+    v
+ResNet50Stage2
+    |
+    v
+ResNet50Stage3
+    |
+    v
+ResNet50Stage4 -> high_level_feature
+    |
+    v
+ASPP
+    |
+    v
+DeepLabV3PlusDecoder(low_level_feature)
+    |
+    v
+bilinear upsample to input size
+    |
+    v
+segmentation logits
+
+Output:
+    logits = [B, NUM_CLASSES, H, W]

@@ -1,0 +1,45 @@
+
+The main thing is that we apply a backbone model, for example ResNet-50, and its input is the raw image. The raw image passes through ResNet-50, and from the early layer(example layer 2) of ResNet-50 we take the low-level feature map, which contains fine details like edges and boundaries. From the deeper/final layer of ResNet-50 we get the high-level feature map, which contains semantic information like object and class meaning.
+
+The high-level feature map goes to ASPP. In ASPP, separate operations are applied in parallel: 1×1 Conv, 3×3 Atrous Conv rate 6, 3×3 Atrous Conv rate 12, 3×3 Atrous Conv rate 18, and Image Pooling. These separate outputs are then concatenated together, and after concatenation a 1×1 Projection Conv is applied. This produces the final encoder output feature map.
+
+Then in the decoder, the low-level feature map from the early layer of ResNet-50 is taken, and a 1×1 Conv is applied to reduce its channels. At the same time, the final encoder output feature map is upsampled by 4. Then the processed low-level feature map and the upsampled encoder output are concatenated. After that, 3×3 Conv layers are applied to refine the combined features. Finally, the output is upsampled by 4 to produce the final segmentation output.
+
+Input Image
+   ↓
+Preprocessing
+   ↓
+ResNet-50 Backbone
+   ├── Early/Middle output: Low-Level Features
+   │          ↓
+   │       1×1 Conv
+   │          ↓
+   │       Goes to Decoder
+   │
+   ↓
+Final ResNet output: High-Level Feature Map
+   ↓
+ASPP
+   ├── 1×1 Conv
+   ├── 3×3 Atrous Conv rate 6
+   ├── 3×3 Atrous Conv rate 12
+   ├── 3×3 Atrous Conv rate 18
+   └── Image Pooling
+   ↓
+Concatenation
+   ↓
+1×1 Projection Conv
+   ↓
+Encoder Output Feature Map
+   ↓
+Upsample ×4
+   ↓
+Concat with processed Low-Level Features
+   ↓
+3×3 Conv Blocks
+   ↓
+1×1 Classifier Conv
+   ↓
+Upsample ×4
+   ↓
+Final Segmentation Map

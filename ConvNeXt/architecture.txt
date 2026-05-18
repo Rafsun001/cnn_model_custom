@@ -1,0 +1,446 @@
+ConvNeXtBaseModel
+    |
+    +-- self.model = ConvNeXtBaseFinalBlock
+
+##############################################################
+######### Full architecture diagram with shape flow ##########
+##############################################################
+
+Input = [B, 3, 64, 64]
+    |
+    v
+ConvNeXtBaseModel
+    |
+    +-- ConvNeXtBaseFinalBlock
+            |
+            +-- self.input_block = InputBlock
+            +-- self.stem        = StemBlock
+            +-- self.stage1      = Stage1
+            +-- self.downsample1 = DownsampleBlock1
+            +-- self.stage2      = Stage2
+            +-- self.downsample2 = DownsampleBlock2
+            +-- self.stage3      = Stage3
+            +-- self.downsample3 = DownsampleBlock3
+            +-- self.stage4      = Stage4
+            +-- self.global_pool = GlobalAveragePoolingBlock
+            +-- self.classifier  = ClassifierHeadBlock
+
+
+========================
+1. Main Forward Flow
+========================
+
+ConvNeXtBaseFinalBlock.forward(x)
+    |
+    +-- InputBlock
+    |       |
+    |       +-- validates input rank = 4
+    |       +-- validates channels = 3
+    |       |
+    |       +-- input  = [B, 3, 64, 64]
+    |       +-- output = [B, 3, 64, 64]
+    |
+    +-- StemBlock
+    |       |
+    |       +-- patchify_conv:
+    |       |       Conv2d(3, 128, kernel_size=4, stride=4, bias=True)
+    |       |
+    |       +-- permute NCHW -> NHWC
+    |       +-- LayerNorm(128, eps=1e-6)
+    |       +-- permute NHWC -> NCHW
+    |       |
+    |       +-- output = [B, 128, 16, 16]
+    |
+    +-- Stage1
+    |       |
+    |       +-- ConvNeXtBlock1
+    |       +-- ConvNeXtBlock2
+    |       +-- ConvNeXtBlock3
+    |       |
+    |       +-- output = [B, 128, 16, 16]
+    |
+    +-- DownsampleBlock1
+    |       |
+    |       +-- permute NCHW -> NHWC
+    |       +-- LayerNorm(128, eps=1e-6)
+    |       +-- permute NHWC -> NCHW
+    |       +-- Conv2d(128, 256, kernel_size=2, stride=2)
+    |       |
+    |       +-- output = [B, 256, 8, 8]
+    |
+    +-- Stage2
+    |       |
+    |       +-- ConvNeXtBlock4
+    |       +-- ConvNeXtBlock5
+    |       +-- ConvNeXtBlock6
+    |       |
+    |       +-- output = [B, 256, 8, 8]
+    |
+    +-- DownsampleBlock2
+    |       |
+    |       +-- permute NCHW -> NHWC
+    |       +-- LayerNorm(256, eps=1e-6)
+    |       +-- permute NHWC -> NCHW
+    |       +-- Conv2d(256, 512, kernel_size=2, stride=2)
+    |       |
+    |       +-- output = [B, 512, 4, 4]
+    |
+    +-- Stage3
+    |       |
+    |       +-- ConvNeXtBlock7
+    |       +-- ConvNeXtBlock8
+    |       +-- ConvNeXtBlock9
+    |       +-- ConvNeXtBlock10
+    |       +-- ConvNeXtBlock11
+    |       +-- ConvNeXtBlock12
+    |       +-- ConvNeXtBlock13
+    |       +-- ConvNeXtBlock14
+    |       +-- ConvNeXtBlock15
+    |       +-- ConvNeXtBlock16
+    |       +-- ConvNeXtBlock17
+    |       +-- ConvNeXtBlock18
+    |       +-- ConvNeXtBlock19
+    |       +-- ConvNeXtBlock20
+    |       +-- ConvNeXtBlock21
+    |       +-- ConvNeXtBlock22
+    |       +-- ConvNeXtBlock23
+    |       +-- ConvNeXtBlock24
+    |       +-- ConvNeXtBlock25
+    |       +-- ConvNeXtBlock26
+    |       +-- ConvNeXtBlock27
+    |       +-- ConvNeXtBlock28
+    |       +-- ConvNeXtBlock29
+    |       +-- ConvNeXtBlock30
+    |       +-- ConvNeXtBlock31
+    |       +-- ConvNeXtBlock32
+    |       +-- ConvNeXtBlock33
+    |       |
+    |       +-- output = [B, 512, 4, 4]
+    |
+    +-- DownsampleBlock3
+    |       |
+    |       +-- permute NCHW -> NHWC
+    |       +-- LayerNorm(512, eps=1e-6)
+    |       +-- permute NHWC -> NCHW
+    |       +-- Conv2d(512, 1024, kernel_size=2, stride=2)
+    |       |
+    |       +-- output = [B, 1024, 2, 2]
+    |
+    +-- Stage4
+    |       |
+    |       +-- ConvNeXtBlock34
+    |       +-- ConvNeXtBlock35
+    |       +-- ConvNeXtBlock36
+    |       |
+    |       +-- output = [B, 1024, 2, 2]
+    |
+    +-- GlobalAveragePoolingBlock
+    |       |
+    |       +-- AdaptiveAvgPool2d((1, 1))
+    |       +-- Flatten
+    |       |
+    |       +-- output = [B, 1024]
+    |
+    +-- ClassifierHeadBlock
+            |
+            +-- LayerNorm(1024, eps=1e-6)
+            +-- Linear(1024, num_classes)
+            |
+            +-- output logits = [B, num_classes]
+
+
+========================
+2. Stage Summary
+========================
+
+ConvNeXt-Base layout:
+    Stem   = patchify Conv 4x4 stride 4, output 128
+    Stage1 = ConvNeXtBlock x3,  output 128
+    Down1  = LayerNorm + Conv2d stride 2, 128 -> 256
+    Stage2 = ConvNeXtBlock x3,  output 256
+    Down2  = LayerNorm + Conv2d stride 2, 256 -> 512
+    Stage3 = ConvNeXtBlock x27, output 512
+    Down3  = LayerNorm + Conv2d stride 2, 512 -> 1024
+    Stage4 = ConvNeXtBlock x3,  output 1024
+    Head   = Global average pool + LayerNorm + Linear
+
+Block depth:
+    3 + 3 + 27 + 3 = 36 ConvNeXt blocks
+
+Channel widths:
+    [128, 256, 512, 1024]
+
+
+========================
+3. Tensor Shape Summary
+========================
+
+For Tiny ImageNet input [B, 3, 64, 64]:
+
+    input_block  = [B, 3, 64, 64]
+    stem         = [B, 128, 16, 16]
+    stage1       = [B, 128, 16, 16]
+    downsample1  = [B, 256, 8, 8]
+    stage2       = [B, 256, 8, 8]
+    downsample2  = [B, 512, 4, 4]
+    stage3       = [B, 512, 4, 4]
+    downsample3  = [B, 1024, 2, 2]
+    stage4       = [B, 1024, 2, 2]
+    global_pool  = [B, 1024]
+    classifier   = [B, num_classes]
+
+For Tiny ImageNet classifier:
+    num_classes = 200
+    output logits = [B, 200]
+
+For ImageNet-1K classifier:
+    num_classes = 1000
+    output logits = [B, 1000]
+
+
+========================
+4. ConvNeXt Block Flow
+========================
+
+ConvNeXtBlock.forward(x)
+    |
+    +-- identity = x
+    |
+    +-- depthwise_conv:
+    |       Conv2d(
+    |           in_channels=C,
+    |           out_channels=C,
+    |           kernel_size=7,
+    |           stride=1,
+    |           padding=3,
+    |           groups=C,
+    |           bias=True,
+    |       )
+    |
+    +-- permute NCHW -> NHWC
+    |
+    +-- LayerNorm(C, eps=1e-6)
+    |
+    +-- pointwise_expand:
+    |       Linear(C, 4C)
+    |
+    +-- GELU
+    |
+    +-- pointwise_project:
+    |       Linear(4C, C)
+    |
+    +-- layer_scale:
+    |       learnable vector initialized to 1e-6
+    |       out = layer_scale * out
+    |
+    +-- permute NHWC -> NCHW
+    |
+    +-- DropPathBlock
+    |
+    +-- out = out + identity
+    |
+    +-- return out
+
+
+========================
+5. Downsampling Flow
+========================
+
+DownsampleBlock1
+    |
+    +-- input = [B, 128, 16, 16]
+    +-- LayerNorm over channels
+    +-- Conv2d(128, 256, kernel_size=2, stride=2)
+    +-- output = [B, 256, 8, 8]
+
+DownsampleBlock2
+    |
+    +-- input = [B, 256, 8, 8]
+    +-- LayerNorm over channels
+    +-- Conv2d(256, 512, kernel_size=2, stride=2)
+    +-- output = [B, 512, 4, 4]
+
+DownsampleBlock3
+    |
+    +-- input = [B, 512, 4, 4]
+    +-- LayerNorm over channels
+    +-- Conv2d(512, 1024, kernel_size=2, stride=2)
+    +-- output = [B, 1024, 2, 2]
+
+
+========================
+6. Drop Path Flow
+========================
+
+ConvNeXtBaseFinalBlock
+    |
+    +-- creates 36 drop path probabilities
+    +-- probabilities increase linearly from 0.0 to drop_path_rate
+    |
+    +-- Stage1 receives drop_path_probs[0:3]
+    +-- Stage2 receives drop_path_probs[3:6]
+    +-- Stage3 receives drop_path_probs[6:33]
+    +-- Stage4 receives drop_path_probs[33:36]
+
+DropPathBlock.forward(x)
+    |
+    +-- if drop_prob == 0.0 or model is eval:
+    |       return x
+    |
+    +-- keep_prob = 1.0 - drop_prob
+    +-- random_tensor shape = [B, 1, 1, 1]
+    +-- return x * random_tensor / keep_prob
+
+Drop path is applied inside every ConvNeXt block right before the residual add:
+    main path output -> DropPathBlock -> add identity
+
+
+========================
+7. Main File Connection
+========================
+
+ConvNeXtBaseModel
+    |
+    +-- ConvNeXtBaseFinalBlock
+            |
+            +-- InputBlock
+            +-- StemBlock
+            +-- Stage1
+            |       |
+            |       +-- ConvNeXtBlock1
+            |       +-- ConvNeXtBlock2
+            |       +-- ConvNeXtBlock3
+            |
+            +-- DownsampleBlock1
+            |
+            +-- Stage2
+            |       |
+            |       +-- ConvNeXtBlock4
+            |       +-- ConvNeXtBlock5
+            |       +-- ConvNeXtBlock6
+            |
+            +-- DownsampleBlock2
+            |
+            +-- Stage3
+            |       |
+            |       +-- ConvNeXtBlock7 through ConvNeXtBlock33
+            |
+            +-- DownsampleBlock3
+            |
+            +-- Stage4
+            |       |
+            |       +-- ConvNeXtBlock34
+            |       +-- ConvNeXtBlock35
+            |       +-- ConvNeXtBlock36
+            |
+            +-- GlobalAveragePoolingBlock
+            +-- ClassifierHeadBlock
+
+
+========================
+8. Training Flow
+========================
+
+run_training.py
+    |
+    +-- set_global_seed(seed)
+    |
+    +-- ImageProcessingConfig
+    |       |
+    |       +-- image_size = 64
+    |       +-- optional strong augmentation
+    |       +-- optional random erasing
+    |
+    +-- TinyImageNetDataModule
+    |       |
+    |       +-- TinyImageNetTrainDataset
+    |       +-- TinyImageNetValDataset
+    |       +-- train_loader
+    |       +-- val_loader
+    |
+    +-- ConvNeXtBaseModel(
+    |       num_classes=200,
+    |       drop_path_rate=training_config.model_drop_path_rate,
+    |       layer_scale_init_value=training_config.layer_scale_init_value,
+    |   )
+    |
+    +-- ConvNeXtTrainer
+            |
+            +-- CrossEntropyLoss
+            +-- AdamW
+            +-- optional AMP
+            +-- optional cosine learning-rate schedule
+            +-- optional mixup
+            +-- optional EMA
+            +-- checkpoint saving
+            +-- metrics CSV writing
+
+
+========================
+9. Complete Forward Summary
+========================
+
+images
+    |
+    v
+InputBlock
+    |
+    v
+StemBlock: patchify Conv 4x4 stride 4
+    |
+    v
+Stage1: ConvNeXtBlock x3
+    |
+    v
+DownsampleBlock1
+    |
+    v
+Stage2: ConvNeXtBlock x3
+    |
+    v
+DownsampleBlock2
+    |
+    v
+Stage3: ConvNeXtBlock x27
+    |
+    v
+DownsampleBlock3
+    |
+    v
+Stage4: ConvNeXtBlock x3
+    |
+    v
+GlobalAveragePoolingBlock
+    |
+    v
+ClassifierHeadBlock
+    |
+    v
+class logits
+
+
+========================
+10. Verification Command
+========================
+
+python .\ConvNeXt\verify_architecture.py
+
+Expected verified output:
+    input_block  = [2, 3, 64, 64]
+    stem         = [2, 128, 16, 16]
+    stage1       = [2, 128, 16, 16]
+    downsample1  = [2, 256, 8, 8]
+    stage2       = [2, 256, 8, 8]
+    downsample2  = [2, 512, 4, 4]
+    stage3       = [2, 512, 4, 4]
+    downsample3  = [2, 1024, 2, 2]
+    stage4       = [2, 1024, 2, 2]
+    global_pool  = [2, 1024]
+    classifier   = [2, 200]
+    output       = [2, 200]
+
+Parameter count with num_classes=200:
+    87,771,464
+
+Parameter count with num_classes=1000:
+    88,591,464
